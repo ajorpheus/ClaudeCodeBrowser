@@ -74,7 +74,12 @@
   }
 
   // Network request interceptor (fetch)
+  // Firefox: window.fetch on the Xray wrapper is read-only, and page-level
+  // requests are not interceptable from the content-script sandbox anyway.
+  // Wrap in try/catch so a failure here cannot kill the message listener
+  // registration below; network logging degrades to unavailable.
   const originalFetch = window.fetch;
+  try {
   window.fetch = async function(...args) {
     const startTime = Date.now();
     const [resource, init] = args;
@@ -136,11 +141,13 @@
       throw error;
     }
   };
+  } catch (e) { /* fetch not writable in this sandbox (Firefox Xray) */ }
 
-  // XHR interceptor
+  // XHR interceptor (same read-only caveat as fetch above)
   const originalXHROpen = XMLHttpRequest.prototype.open;
   const originalXHRSend = XMLHttpRequest.prototype.send;
 
+  try {
   XMLHttpRequest.prototype.open = function(method, url, ...rest) {
     this._logData = {
       type: 'xhr',
@@ -179,6 +186,7 @@
     }
     return originalXHRSend.apply(this, [body]);
   };
+  } catch (e) { /* XHR prototype not writable in this sandbox (Firefox Xray) */ }
 
   // Initialize console interception (always intercepts, but only logs when enabled)
   interceptConsole();
