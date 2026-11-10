@@ -32,10 +32,28 @@ CLAIM_JS = r'''(()=>{
   fav.href = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="#ff7a00"/><text x="8" y="12" font-size="10" text-anchor="middle" fill="#fff" font-family="monospace" font-weight="bold">C</text></svg>');
   document.head.appendChild(fav);
   const PFX = '[CC] ';
-  const apply = () => { if (!document.title.startsWith(PFX)) document.title = PFX + document.title; };
+  // Some pages rewrite the title (Classroom collapses \W+ to '_', so '[CC] '
+  // becomes '_CC_'); match the marker in either form or we prepend forever.
+  const MARK = /^(?:\[CC\] |_CC_)/;
+  const apply = () => { if (!MARK.test(document.title)) document.title = PFX + document.title; };
   apply();
+  // Re-apply via setTimeout, never synchronously in the observer: SPAs that
+  // enforce their own title (Google Classroom) otherwise ping-pong with us in
+  // a microtask loop that livelocks the content process. Give up after 20.
+  let pending = false, reapplied = 0;
   const t = document.querySelector('title');
-  if (t) { window.__ccbClaimMO = new MutationObserver(apply); window.__ccbClaimMO.observe(t, {childList:true, characterData:true, subtree:true}); }
+  if (t) {
+    window.__ccbClaimMO = new MutationObserver(() => {
+      if (pending || MARK.test(document.title)) return;
+      pending = true;
+      setTimeout(() => {
+        pending = false;
+        if (++reapplied > 20) { window.__ccbClaimMO?.disconnect(); return; }
+        apply();
+      }, 300);
+    });
+    window.__ccbClaimMO.observe(t, {childList:true, characterData:true, subtree:true});
+  }
   return 'claimed';
 })()'''
 
@@ -45,7 +63,7 @@ RELEASE_JS = r'''(()=>{
   document.getElementById('ccb-claim-fav')?.remove();
   (window.__ccbFavStash || []).forEach(l => document.head.appendChild(l));
   delete window.__ccbFavStash;
-  if (document.title.startsWith('[CC] ')) document.title = document.title.slice(5);
+  document.title = document.title.replace(/^(?:\[CC\] |_CC_)+/, '');
   return 'released';
 })()'''
 
